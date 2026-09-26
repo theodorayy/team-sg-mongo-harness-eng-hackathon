@@ -70,6 +70,20 @@ class MemoryApiService:
         self.sources_collection = sources_collection
         self.api_token = api_token or None
 
+    def search_raw_sources(self, query: str, limit: int = 200) -> dict[str, Any]:
+        """Search source_records by text query and return a large slice."""
+        if self.sources_collection is None:
+            return {"text": "", "token_estimate": 0, "count": 0}
+        terms = query.strip().split()
+        if not terms:
+            return {"text": "", "token_estimate": 0, "count": 0}
+        regex = "|".join(re.escape(t) for t in terms)
+        docs = list(self.sources_collection.find(
+            {"text": {"$regex": regex, "$options": "i"}},
+            {"_id": 0, "id": 1, "text": 1, "occurred_at": 1, "metadata": 1},
+        ).limit(limit))
+        return self._format_source_docs(docs)
+
     def get_raw_sources(self, source_ids: list[str], limit: int = 50) -> dict[str, Any]:
         if self.sources_collection is None:
             return {"sources": [], "text": "", "token_estimate": 0}
@@ -78,6 +92,9 @@ class MemoryApiService:
             {"id": {"$in": ids}},
             {"_id": 0, "id": 1, "text": 1, "occurred_at": 1, "metadata": 1},
         ))
+        return self._format_source_docs(docs)
+
+    def _format_source_docs(self, docs: list[dict[str, Any]]) -> dict[str, Any]:
         lines = []
         for doc in docs:
             meta = doc.get("metadata") or {}
@@ -260,6 +277,18 @@ def _dispatch(
         except ValueError as exc:
             raise ValueError("limit must be an integer") from exc
         return {"messages": service.list_messages(parts[2], limit)}, 200
+
+    if len(parts) == 3 and parts[:2] == ["v1", "sources"] and parts[2] == "search":
+        if method != "POST":
+            return {"error": "method not allowed"}, 405
+        body = _read_json_body(environ)
+        q = body.get("query", "")
+        if not isinstance(q, str) or not q.strip():
+            raise ValueError("query must be a non-empty string")
+        limit = body.get("limit", 200)
+        if not isinstance(limit, int) or limit < 1:
+            limit = 200
+        return service.search_raw_sources(q, min(limit, 500)), 200
 
     if len(parts) == 2 and parts[0] == "v1" and parts[1] == "sources":
         if method != "POST":

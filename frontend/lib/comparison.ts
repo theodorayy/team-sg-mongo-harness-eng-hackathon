@@ -197,9 +197,9 @@ export async function compareResponses(
       output_tokens: result.usage?.completion_tokens ?? null,
     };
   }
-  const rawSources = await client.request("POST", "/v1/sources", {
-    source_ids: [...new Set(context.source_ids)],
-    limit: 50,
+  const rawSources = await client.request("POST", "/v1/sources/search", {
+    query: input.prompt,
+    limit: 200,
   });
   const baselineContext =
     typeof rawSources.text === "string" && rawSources.text
