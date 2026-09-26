@@ -135,11 +135,30 @@ def retrieve_context(
     }
 
     requested_seed_candidates = max(limits.seed_limit * 4, limits.seed_limit)
-    # AtlasMemorySearch bounds a vector query to 100 candidates. Keep custom
-    # retrieval limits compatible and expose the tighter candidate search cap.
     candidate_seed_limit = min(requested_seed_candidates, 100)
+
+    summary_filters = {**search_filters, "kind": "summary"}
+    summary_hits = store.search_memories(query, min(limits.seed_limit, 10), summary_filters)
     raw_hits = store.search_memories(query, candidate_seed_limit, search_filters)
-    eligible_seeds = _load_available_hits(store, raw_hits, replay_time)
+
+    seen_ids: set[str] = set()
+    merged: list[Document] = []
+    for hit in summary_hits:
+        doc_id = hit.get("id") or _document_id(hit)
+        if doc_id not in seen_ids:
+            seen_ids.add(doc_id)
+            merged.append(hit)
+    for hit in raw_hits:
+        doc_id = hit.get("id") or _document_id(hit)
+        if doc_id not in seen_ids:
+            seen_ids.add(doc_id)
+            merged.append(hit)
+
+    eligible_seeds = _load_available_hits(store, merged, replay_time)
+    eligible_seeds = [
+        (node, score * 1.5 if node.kind == "summary" else score)
+        for node, score in eligible_seeds
+    ]
     eligible_seeds.sort(key=lambda item: (-item[1], item[0].id))
     truncated = (
         candidate_seed_limit < requested_seed_candidates
